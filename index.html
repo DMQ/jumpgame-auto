@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>跳一跳半自动</title>
+    <style>
+        .btn {
+            border: none;
+            background: #128ff3;
+            color: #fff;
+            padding: 4px 12px;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+        }
+        #screenshot {
+            display: block;
+        }
+        #screenshot-wrap {
+            position: relative;
+            display: inline-block;
+        }
+        #screenshot-cover {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #error-tips, #operation {
+            color: #ff0000
+        }
+    </style>
+</head>
+<body>
+    <p id="device-size"></p>
+    <p id="error-tips"></p>
+    <p id="operation">
+        <span class="tips"></span>
+        <button class="btn">loading...</button>
+    </p>
+    <p><button class="btn" id="screenshot-btn">刷新截屏</button></p>
+    <div id="screenshot-wrap">
+        <img id="screenshot" src="" alt="">
+        <canvas id="screenshot-cover"></canvas>
+    </div>
+    <script src="http://cdn.bootcss.com/zepto/1.2.0/zepto.min.js
+    "></script>
+    <script>
+        let screenScale = 1 / 3 // 屏幕缩放比例
+        let timeFactor  // 时间系数
+        let eventBus = $({})
+
+        let ws = new WebSocket('ws://127.0.0.1:8899')
+
+        ws.addEventListener('open', () => {
+            ws.addEventListener('message', event => {
+                let message = JSON.parse(event.data)
+                console.log('onmessage:', message)
+                eventBus.trigger(message.type, [message.data])
+            })
+        })
+
+        let ws_send = ws.send
+        ws.send = function(param) {
+            return new Promise((resolve, reject) => {
+                eventBus.one(param.type, (e, data) => {
+                    resolve(data)
+                })
+                ws_send.call(ws, JSON.stringify(param))
+            })
+        }
+
+        eventBus.on('size', (e, size) => {
+            $('#device-size').html(`屏幕尺寸：${size.width} x ${size.height}`)
+            $('#screenshot').width(size.width * screenScale)
+            $('#screenshot-cover').prop('width', size.width * screenScale)
+                .prop('height', size.height * screenScale)
+
+            // 初始化第一步操作
+            nextOperationStep()
+
+            $('#screenshot-btn').on('click', () => {
+                pullScreenshot()
+            })
+            
+        }).on('screenshot', (e, base64) => {
+            $('#screenshot').attr('src', base64)
+        }).on('error', (e, error) => {
+            if (/device not found/.test(data)) {
+                $('#error-tips').html('请先用usb连接Android手机，并开启USB调试')
+            } else {
+                $('#error-tips').html(`错误：${data}`)
+            }
+        })
+
+        function pullScreenshot() {
+            return ws.send({type: 'screenshot', data: {}})
+        }
+
+        
+        // 操作步骤
+        var index = 0
+        var operationSteps = [{
+            tips: '先进入微信跳一跳小游戏，并点击开始游戏..',
+            btnText: '下一步',
+            btnHandler: function() {
+                ws.send({type: 'screenshot', data: {}})
+            },
+            destroy: function() {}
+        }, {
+            tips: '先在截图上选择小人底部中心位置和第二个方块的上面中心位置后，截图处长按控制小人跳，保证能跳到第二个方块的圆心后（为保证之后每一次跳的精准度，这一步失败必须重试），点击下一步',
+            btnText: '下一步',
+            init: function() {
+                let touchstart = false
+                let startTime
+                let $canvas = $('#screenshot-cover')
+                let ctx = $canvas[0].getContext('2d')
+                let circleCount = 0
+                
+                this.points = []
+                this.ctx = ctx
+
+                $canvas.on('click', (e) => {
+                    if (circleCount < 2) {
+                        ctx.fillStyle = '#128ff3'
+                        drawCircle(ctx, e.offsetX, e.offsetY, 4)
+                        this.points.push({x: e.offsetX, y: e.offsetY})
+                        circleCount++
+                    }
+                })
+
+                $canvas.on('mousedown', (e) => {
+                    if (circleCount < 2) return 
+                    touchstart = true
+                    startTime = Date.now()
+                }).on('mouseup', (e) => {                    
+                    if (touchstart) {
+                        this.longTapTime = Date.now() - startTime
+                        let x = e.offsetX / screenScale
+                        let y = e.offsetY / screenScale
+
+                        if (this.longTapTime > 50) {
+                            ws.send({type: 'longtap', data: {x: x, y: y, time: this.longTapTime}}).then(() => {
+                                setTimeout(() => {
+                                    pullScreenshot().then(() => {
+                                        // clearCanvas(ctx)
+                                    })
+                                }, 1000)
+                            })
+
+                            touchstart = false
+                        } else {
+                            ws.send({type: 'tap', data: {x: x, y: y}}).then(() => {
+                                setTimeout(() => {
+                                    pullScreenshot().then(() => {
+                                        // clearCanvas(ctx)
+                                    })
+                                }, 1000)
+                            })  
+                            
+                            touchstart = false
+                        }
+
+                        // setTimeout(() => {
+                        //     pullScreenshot()
+                        // }, 2000)
+                    }
+                })
+            },
+            btnHandler: function() {
+                let point1 = this.points[0]
+                let point2 = this.points[1]
+                let distance = calcDistance(point1.x, point1.y, point2.x, point2.y)
+                timeFactor = this.longTapTime / distance
+
+                clearCanvas(this.ctx)
+            },
+            destroy: function() {
+                $('#screenshot-cover').off()
+            }
+        }, {
+            tips: '现在，开始拿分了！依次选择小人的底部中心位置、下一个方块的上面中心位置，小人将会自动跳',
+            btnText: '666',
+            init: function() {
+                let $canvas = $('#screenshot-cover')
+                let ctx = $canvas[0].getContext('2d')
+                let circleCount = 0
+                let points = []
+                let waiting = false
+
+                $canvas.on('click', (e) => {
+                    if (waiting) return 
+
+                    // if (circleCount < 2) {
+                        ctx.fillStyle = '#128ff3'
+                        drawCircle(ctx, e.offsetX, e.offsetY, 4)
+                        points.push({x: e.offsetX, y: e.offsetY})
+                        circleCount++
+                    // }
+
+                    if (circleCount == 2) {
+                        waiting = true
+                        let point1 = points[0]
+                        let point2 = points[1]
+                        let distance = calcDistance(point1.x, point1.y, point2.x, point2.y)
+                        let time = Math.round(distance * timeFactor)
+                        ws.send({type: 'longtap', data: {x: 0, y: 0, time: time}}).then(() => {
+                            setTimeout(() => {
+                                pullScreenshot().then(() => {
+                                    waiting = false
+                                    circleCount = 0
+                                    points = []
+                                    clearCanvas(ctx)
+                                })
+                            }, 1000)
+                        })
+                    }
+                })
+            }
+        }]
+        
+        function nextOperationStep() {
+            let operation = operationSteps[index]
+
+            if (!operation) return
+
+            operation.init && operation.init()
+
+            $('#operation')
+                .find('.tips').text(operation.tips)
+
+            $('#operation').find('.btn')
+                .text(operation.btnText)
+                .off('click')
+                .on('click', function(e) {
+                    operation.btnHandler && operation.btnHandler(e)
+                    operation.destroy && operation.destroy()
+
+                    index++;
+                    nextOperationStep()
+                })
+        }
+
+        function calcDistance(x1, y1, x2, y2) {
+            return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2))
+        }
+
+        function clearCanvas(ctx) {
+            ctx.clearRect(0, 0, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)
+        }
+
+        function drawCircle(ctx, x, y, radius) {
+            ctx.save()
+            ctx.beginPath()
+            ctx.arc(x, y, radius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.restore()
+        }        
+    </script>
+</body>
+</html>

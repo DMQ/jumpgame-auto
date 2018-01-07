@@ -1,41 +1,90 @@
+const path = require('path')
+const fs = require('fs')
+const WebSocket = require('ws')
 const readLine = require('readline')
-const exec = require('child_process').exec
+const adbHelper = require('./adbHelper')
 
-let stepCount = 1
+// let stepCount = 1
 
-function execAdb(distance) {
-	let factor = 710 / 32
-	let time = Math.round(factor * distance)
 
-	return new Promise((resolve, reject) => {
-		let adb = exec(`adb shell input swipe 0 0 0 0 ${time}`, (error, stdout, stderr) => {
-			console.log(`step ${stepCount++}`)
-			adb.kill()
-			resolve()
+// let rl = readLine.createInterface({
+// 	input: process.stdin,
+// 	output: process.stdout
+// })
+
+// rl.setPrompt('输入距离(mm)：')
+// rl.prompt()
+
+// rl.on('line', line => {
+// 	line = line.trim()
+
+// 	if (!/\d+/g.test(line)) {
+// 		return console.warn('请输入数字')
+// 	}
+
+// 	adbHelper.longTap(line).then(() => {
+// 		rl.prompt()
+// 	})
+// })
+
+
+let screenshotPath = path.resolve('./screenshot/screenshot.png')
+
+function pushScreenshot(ws) {
+	adbHelper.screenshot(screenshotPath).then((path) => {		
+		// let data = fs.readFileSync(path, {encoding: 'base64'})
+		// data = 'data:image/png;base64,' + data
+
+		ws.send(JSON.stringify({type: 'screenshot', data: path + '?_=' + Date.now()}), () => {
+			console.log('push screenshot to client success')
+			// pushScreenshot(ws)
 		})
+	}).catch(stderr => {
+		console.log('pushScreenshot error:', stderr)
 	})
 }
 
-let rl = readLine.createInterface({
-	input: process.stdin,
-	output: process.stdout
-})
+// websocket通信
+let wss = new WebSocket.Server({port: 8899})
 
-rl.setPrompt('输入距离(mm)：')
-rl.prompt()
+wss.on('connection', (ws, req) => {
+	console.log('connection success')
+	// 获取设备分辨率
+	adbHelper.getDeviceSize().then(size => {
+		ws.on('message', message => {
+			console.log('received message:', message)
+			message = JSON.parse(message)
+			let data = message.data
 
-rl.on('line', line => {
-	line = line.trim()
+			if (message.type == 'screenshot') {
+				pushScreenshot(ws)
+			} else if (message.type == 'tap') {
+				adbHelper.tap(data.x, data.y).then(() => {
+					ws.send(JSON.stringify({type: 'tap', data: data}))
+				})
+			} else if (message.type == 'longtap') {
+				adbHelper.longTap(data.x, data.y, data.time).then(() => {
+					ws.send(JSON.stringify({type: 'longtap', data: data}))
+				})
+			}
+		});
+		ws.send(JSON.stringify({type: 'size', data: size}))
+		pushScreenshot(ws)
 
-	if (!/\d+/g.test(line)) {
-		return console.warn('请输入数字')
-	}
+		ws.on('close', () => {
+			console.log('ws close')
+		})
 
-	execAdb(line).then(() => {
-		rl.prompt()
+		ws.on('error', () => {
+			console.log('ws connection error')
+			ws.close()
+		})
+	}).then(() => {
+		// pushScreenshot(ws)
+	}).catch(error => {
+		ws.send(JSON.stringify({type: 'error', data: error}))
+		ws.close()
 	})
-})
+});
 
-// process.on('exit', () => {
-// 	rl.clear()
-// })
+console.log('websocket listening port 8899...')

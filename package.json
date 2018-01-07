@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/DMQ/jumpgame-auto/issues"
   },
-  "homepage": "https://github.com/DMQ/jumpgame-auto#readme"
+  "homepage": "https://github.com/DMQ/jumpgame-auto#readme",
+  "devDependencies": {
+    "ws": "^4.0.0"
+  }
 }
