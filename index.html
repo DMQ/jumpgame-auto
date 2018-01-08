@@ -33,26 +33,79 @@
         #error-tips, #operation {
             color: #ff0000
         }
+
+        #coefficient-range-wrap {
+            margin-top: 30px;
+            margin-left: 22px;
+        }
+
+        #coefficient-range-title {
+            margin-bottom: 50px;
+        }
+
+        #coefficient-group {
+            display: inline-block;
+            width: 400px;
+            position: relative;
+        }
+
+        #coefficient-range{
+            width: 100%;
+        }
+
+        #coefficient-range-tips {
+            position: absolute;
+            left: 0;
+            top: -25px;
+            background: #128ff3;
+            color: #fff;
+            padding: 2px 7px;
+            font-size: 12px;
+            border-radius: 4px;
+            transform: translateX(-50%);
+            transition: left 200ms ease-out
+        }
+        #coefficient-range-tips:after {
+            content: '';
+            display: block;
+            width: 6px;
+            height: 6px;
+            position: absolute;
+            background: #128ff3;
+            left: 50%;
+            transform: rotate(45deg);
+            bottom: -2.5px;
+            margin-left: -2.5px;
+        }
     </style>
 </head>
 <body>
-    <p id="device-size"></p>
+    <p id="device-size">loading...</p>
     <p id="error-tips"></p>
+    <!--<p><button class="btn" id="screenshot-btn">刷新截屏</button></p>-->
+    <p id="coefficient-range-title" style="display: none;">弹跳时间系数：</p>
+    <div id="coefficient-range-wrap" style="display: none;">
+        <div id="coefficient-group">
+            <input id="coefficient-range" type="range" min="0" max="4" step="0.001" value="0"/>
+            <span id="coefficient-range-tips">0.000</span>
+        </div>
+    </div>
+
     <p id="operation">
         <span class="tips"></span>
-        <button class="btn">loading...</button>
     </p>
-    <p><button class="btn" id="screenshot-btn">刷新截屏</button></p>
-    <div id="screenshot-wrap">
+    <!--<div id="screenshot-wrap">
         <img id="screenshot" src="" alt="">
         <canvas id="screenshot-cover"></canvas>
-    </div>
+    </div>-->
     <script src="http://cdn.bootcss.com/zepto/1.2.0/zepto.min.js
     "></script>
+    <script src="./config/coefficient-config.js"></script>
     <script>
         let screenScale = 1 / 3 // 屏幕缩放比例
-        let timeFactor  // 时间系数
-        let eventBus = $({})
+        let coefficient = 1.392 // 时间系数
+        let screenSize = {}
+        let wsEventBus = $({})
 
         let ws = new WebSocket('ws://127.0.0.1:8899')
 
@@ -60,40 +113,37 @@
             ws.addEventListener('message', event => {
                 let message = JSON.parse(event.data)
                 console.log('onmessage:', message)
-                eventBus.trigger(message.type, [message.data])
+                wsEventBus.trigger(message.type, [message.data])
             })
         })
 
         let ws_send = ws.send
         ws.send = function(param) {
             return new Promise((resolve, reject) => {
-                eventBus.one(param.type, (e, data) => {
+                wsEventBus.one(param.type, (e, data) => {
                     resolve(data)
                 })
                 ws_send.call(ws, JSON.stringify(param))
             })
         }
 
-        eventBus.on('size', (e, size) => {
+        wsEventBus.on('size', (e, size) => {
             $('#device-size').html(`屏幕尺寸：${size.width} x ${size.height}`)
             $('#screenshot').width(size.width * screenScale)
             $('#screenshot-cover').prop('width', size.width * screenScale)
                 .prop('height', size.height * screenScale)
 
+            screenSize = size
             // 初始化第一步操作
             nextOperationStep()
-
-            $('#screenshot-btn').on('click', () => {
-                pullScreenshot()
-            })
             
         }).on('screenshot', (e, base64) => {
             $('#screenshot').attr('src', base64)
         }).on('error', (e, error) => {
-            if (/device not found/.test(data)) {
+            if (/device not found|no devices/.test(error)) {
                 $('#error-tips').html('请先用usb连接Android手机，并开启USB调试')
             } else {
-                $('#error-tips').html(`错误：${data}`)
+                $('#error-tips').html(`错误：${error}`)
             }
         })
 
@@ -105,13 +155,38 @@
         // 操作步骤
         var index = 0
         var operationSteps = [{
-            tips: '先进入微信跳一跳小游戏，并点击开始游戏..',
-            btnText: '下一步',
-            btnHandler: function() {
-                ws.send({type: 'screenshot', data: {}})
+            tips: '先进入微信跳一跳小游戏，并点击开始游戏后',
+            init: function() {
+                let coefficient = coefficientConfig[`${screenSize.width}2x${screenSize.height}`]
+                let $title = $('#coefficient-range-title')
+
+                if (coefficient) {
+                    $title.html($title.html() + `已根据你的机型设置最佳系数 ${coefficient}，无需手动调整`)
+                } else {
+                    coefficient = coefficientConfig['default']
+                    $title.html($title.html() + `暂无法匹配你的机型最佳系数，已设置默认系数 ${coefficient}，可手动拖拉进度条调整系数`)
+                }
+
+
+                $title.show()
+                $('#coefficient-range-wrap').show()
+                $('#coefficient-range').val(coefficient).trigger('input')
+
+                
             },
+            buttons: [{
+                text: '确认开始', 
+                click: function () {
+
+                }
+            }, {
+                text: '确认系数无误',
+                click: function() {
+
+                }
+            }],
             destroy: function() {}
-        }, {
+        },/* {
             tips: '先在截图上选择小人底部中心位置和第二个方块的上面中心位置后，截图处长按控制小人跳，保证能跳到第二个方块的圆心后（为保证之后每一次跳的精准度，这一步失败必须重试），点击下一步',
             btnText: '下一步',
             init: function() {
@@ -175,14 +250,14 @@
                 let point1 = this.points[0]
                 let point2 = this.points[1]
                 let distance = calcDistance(point1.x, point1.y, point2.x, point2.y)
-                timeFactor = this.longTapTime / distance
+                coefficient = this.longTapTime / distance
 
                 clearCanvas(this.ctx)
             },
             destroy: function() {
                 $('#screenshot-cover').off()
             }
-        }, {
+        }, */{
             tips: '现在，开始拿分了！依次选择小人的底部中心位置、下一个方块的上面中心位置，小人将会自动跳',
             btnText: '666',
             init: function() {
@@ -207,7 +282,7 @@
                         let point1 = points[0]
                         let point2 = points[1]
                         let distance = calcDistance(point1.x, point1.y, point2.x, point2.y)
-                        let time = Math.round(distance * timeFactor)
+                        let time = Math.round((distance / screenScale) * coefficient)
                         ws.send({type: 'longtap', data: {x: 0, y: 0, time: time}}).then(() => {
                             setTimeout(() => {
                                 pullScreenshot().then(() => {
@@ -225,24 +300,22 @@
         
         function nextOperationStep() {
             let operation = operationSteps[index]
+            let $operation = $('#operation')
 
             if (!operation) return
 
             operation.init && operation.init()
 
-            $('#operation')
-                .find('.tips').text(operation.tips)
+            $operation.find('.tips').text(operation.tips)
+            
+            ;(operation.buttons || []).forEach(button => {
+                let $btn = $(button.text)
+                $btn.on('click', (...args) => {
+                    button.click.apply(operation, ...args)
+                }).appendTo($operation)
+            })
 
-            $('#operation').find('.btn')
-                .text(operation.btnText)
-                .off('click')
-                .on('click', function(e) {
-                    operation.btnHandler && operation.btnHandler(e)
-                    operation.destroy && operation.destroy()
-
-                    index++;
-                    nextOperationStep()
-                })
+            index++
         }
 
         function calcDistance(x1, y1, x2, y2) {
@@ -260,6 +333,27 @@
             ctx.fill()
             ctx.restore()
         }        
+
+
+        (() => {
+            // 时间系数设置
+            var $range = $('#coefficient-range')
+            var $rangeTips = $('#coefficient-range-tips')
+
+            $range.on('input', function() {
+                updateRangeTips(this.value, this.max)
+            }).on('change', function() {
+                updateRangeTips(this.value, this.max)
+            })
+
+            function updateRangeTips(value, max) {
+                value = (+value).toFixed(3)
+                let left = value / max * $range.width()
+                $rangeTips.html(value)
+                    .css('left', left)
+            }
+        })()
+
     </script>
 </body>
 </html>

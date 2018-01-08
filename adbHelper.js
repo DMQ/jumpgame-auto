@@ -59,17 +59,11 @@ function getDeviceSize() {
 
 function screenshot(path) {
 	return new Promise((resolve, reject) => {
-		let subProcess = exec(`adb shell screencap -p /sdcard/screenshot.png`, (error, stdout, stderr) => {
+		let subProcess = exec(`adb shell screencap -p /sdcard/screenshot.png & adb pull /sdcard/screenshot.png ${path}`, (error, stdout, stderr) => {
 			if (error) {
 				reject(stderr)
 			} else {
-				subProcess = exec(`adb pull /sdcard/screenshot.png ${path}`, (error, stdout, stderr) => {
-					if (error) {
-						reject(stderr)
-					} else {
-						resolve(path)
-					}
-				})
+				resolve(path)
 			}
 		})
 	})

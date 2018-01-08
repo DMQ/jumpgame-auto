@@ -4,30 +4,6 @@ const WebSocket = require('ws')
 const readLine = require('readline')
 const adbHelper = require('./adbHelper')
 
-// let stepCount = 1
-
-
-// let rl = readLine.createInterface({
-// 	input: process.stdin,
-// 	output: process.stdout
-// })
-
-// rl.setPrompt('输入距离(mm)：')
-// rl.prompt()
-
-// rl.on('line', line => {
-// 	line = line.trim()
-
-// 	if (!/\d+/g.test(line)) {
-// 		return console.warn('请输入数字')
-// 	}
-
-// 	adbHelper.longTap(line).then(() => {
-// 		rl.prompt()
-// 	})
-// })
-
-
 let screenshotPath = path.resolve('./screenshot/screenshot.png')
 
 function pushScreenshot(ws) {
