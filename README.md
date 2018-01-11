@@ -29,7 +29,7 @@
     npm i
     npm run start
     ```
-- 确认服务启动后(输出websocket listening port 8899...)，在Chrome打开index.html，并根据页面指示操作即可
+- 确认服务启动后(输出websocket listening port 8899...)，在根目录找到index.html，用Chrome打开，并根据页面指示操作即可
 
 
 ### Good Luck!
