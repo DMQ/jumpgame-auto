@@ -6,9 +6,10 @@ const adbHelper = require('./adbHelper')
 
 let screenshotHandler = {
     pushPromise: null,
-    screenshotPath: path.resolve('./screenshot/screenshot.png'),
+    screenshotPath: path.resolve('${__dirname}/../screenshot/screenshot.png'),
 
     push() {
+        console.log(`start screenshot to path: ${this.screenshotPath}`)
         return this.pushPromise || (this.pushPromise = adbHelper.screenshot(this.screenshotPath)
             .then(() => {
                 this.pushPromise = null

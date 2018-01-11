@@ -9,6 +9,9 @@
         * {
             font-size: 14px;
         }
+        body {
+            padding-left: 20px;
+        }
         .btn {
             border: none;
             background: #128ff3;
@@ -21,6 +24,7 @@
         }
         .left {
             width: 500px;
+            margin-right: 40px;
         }
         .left, .right {
             float: left
@@ -95,6 +99,23 @@
             bottom: -2.5px;
             margin-left: -2.5px;
         }
+        #select-point-demo {
+            position: relative;
+            color: #128ff3;
+            cursor: pointer;
+        }
+        #select-point-demo img{
+            position: absolute;
+            left: 120%;
+            opacity: 0;
+            transition: all 200ms ease;
+            z-index: -9
+        }
+        #select-point-demo:hover img {
+            left: 102%;
+            opacity: 1;
+            z-index: 1;
+        }
     </style>
 </head>
 <body>
@@ -124,11 +145,15 @@
                     1. 先打开微信，进入跳一跳小游戏，点击开始游戏
                 </p>
                 <p>
-                    2. 在右边截图中依次点击选取棋子小人的底座中心点和下一个积木的顶面中心点，并点击试跳按钮进行试跳，看时间系数是否正确<br>
+                    2. 在右边截图中依次点击选取(单击)棋子小人的底座中心点，和下一个积木的顶面中心点(单击)，并点击试跳按钮进行试跳，看时间系数是否正确<br>
+                    <span id="select-point-demo">
+                        怎么选？
+                        <img src="./screenshot/demo.gif" alt="">
+                    </span>
                 </p>
                 <button id="jump-test-btn" class="btn">试跳</button>
                 <p>
-                    3. 如果能正确跳到积木中心，说明系数正确，可开始刷分，如果没跳正中心，需要手动调整系数继续试跳
+                    3. 如果能正确跳到积木中心，说明系数正确，可开始刷分，如果没跳正中心，需要手动调整系数继续试跳，确认系数正确后，点击开始刷分进入下一步
                 </p>
                 <button id="step1-next-step" class="btn">开始刷分</button>
             </div>
@@ -153,8 +178,8 @@
         <br>
     </div>
 
-    <script src="http://cdn.bootcss.com/zepto/1.2.0/zepto.min.js"></script>
-    <script src="./config/coefficient-config.js"></script>
+    <script src="./js/zepto.min.js"></script>
+    <script src="./js/coefficient-config.js"></script>
     <script>        
         let SCREEN_SCALE = 1 / 3 // 屏幕缩放比例
 
