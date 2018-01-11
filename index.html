@@ -453,9 +453,12 @@
                         let distance = common.calcDistance(x1, y1, x2, y2)
                         let pressTime = Math.round(distance * rangeComp.getRange()) // 长按时长
 
+                        let x = parseInt(Math.random() * 200)
+                        let y = parseInt(500 + Math.random() * 500)
+
                         return ws.send({
                             type: 'longtap', 
-                            data: {time: pressTime, x: 0, y: 0}}
+                            data: {time: pressTime, x, y}}
                         ).then(() => {
                             resetStatus()
                         })
