@@ -4,63 +4,73 @@ const WebSocket = require('ws')
 const readLine = require('readline')
 const adbHelper = require('./adbHelper')
 
-let screenshotPath = path.resolve('./screenshot/screenshot.png')
+let screenshotHandler = {
+    pushPromise: null,
+    screenshotPath: path.resolve('./screenshot/screenshot.png'),
 
-function pushScreenshot(ws) {
-	adbHelper.screenshot(screenshotPath).then((path) => {		
-		// let data = fs.readFileSync(path, {encoding: 'base64'})
-		// data = 'data:image/png;base64,' + data
-
-		ws.send(JSON.stringify({type: 'screenshot', data: path + '?_=' + Date.now()}), () => {
-			console.log('push screenshot to client success')
-			// pushScreenshot(ws)
-		})
-	}).catch(stderr => {
-		console.log('pushScreenshot error:', stderr)
-	})
+    push() {
+        return this.pushPromise || (this.pushPromise = adbHelper.screenshot(this.screenshotPath)
+            .then(() => {
+                this.pushPromise = null
+                return `${this.screenshotPath}?_t=${Date.now()}`
+            }).catch(stderr => {
+                console.log('pushScreenshot error:', stderr)
+                this.pushPromise = null
+                return Promise.reject(stderr)
+            })
+        )
+    }
 }
 
 // websocket通信
 let wss = new WebSocket.Server({port: 8899})
 
 wss.on('connection', (ws, req) => {
-	console.log('connection success')
+    console.log('connection success')
+    let getDeviceSizePromise = adbHelper.getDeviceSize()
 	// 获取设备分辨率
-	adbHelper.getDeviceSize().then(size => {
-		ws.on('message', message => {
-			console.log('received message:', message)
-			message = JSON.parse(message)
-			let data = message.data
+    ws.on('message', message => {
+        console.log('received message:', message)
+        message = JSON.parse(message)
+        let data = message.data
 
-			if (message.type == 'screenshot') {
-				pushScreenshot(ws)
-			} else if (message.type == 'tap') {
-				adbHelper.tap(data.x, data.y).then(() => {
-					ws.send(JSON.stringify({type: 'tap', data: data}))
-				})
-			} else if (message.type == 'longtap') {
-				adbHelper.longTap(data.x, data.y, data.time).then(() => {
-					ws.send(JSON.stringify({type: 'longtap', data: data}))
-				})
-			}
-		});
-		ws.send(JSON.stringify({type: 'size', data: size}))
-		pushScreenshot(ws)
+        getDeviceSizePromise.then(size => {
+            if (message.type == 'screenshot') {
+                (function loopPush(){
+                    screenshotHandler.push().then(path => {
+                        ws.send(JSON.stringify({type: 'screenshot', data: path}), () => {
+                            data.needLoop && loopPush()
+                        })
+                    })
+                })()
 
-		ws.on('close', () => {
-			console.log('ws close')
-		})
+            } else if (message.type == 'tap') {
+                adbHelper.tap(data.x, data.y).then(() => {
+                    ws.send(JSON.stringify({type: 'tap', data: data}))
+                })
 
-		ws.on('error', () => {
-			console.log('ws connection error')
-			ws.close()
-		})
-	}).then(() => {
-		// pushScreenshot(ws)
-	}).catch(error => {
-		ws.send(JSON.stringify({type: 'error', data: error}))
-		ws.close()
-	})
+            } else if (message.type == 'longtap') {
+                adbHelper.longTap(data.x, data.y, data.time).then(() => {
+                    ws.send(JSON.stringify({type: 'longtap', data: data}))
+                })
+
+            } else if (message.type == 'size') {
+                ws.send(JSON.stringify({type: 'size', data: size}))
+            }
+        }).catch(error => {
+            console.log('get device size error:', error)
+            ws.send(JSON.stringify({type: 'deviceError', data: error}))
+        })
+    });
+
+    ws.on('close', () => {
+        console.log('ws close')
+    })
+
+    ws.on('error', () => {
+        console.log('ws connection error')
+        ws.close()
+    })
 });
 
 console.log('websocket listening port 8899...')

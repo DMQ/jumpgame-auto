@@ -6,6 +6,9 @@
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>跳一跳半自动</title>
     <style>
+        * {
+            font-size: 14px;
+        }
         .btn {
             border: none;
             background: #128ff3;
@@ -16,6 +19,12 @@
             outline: none;
             cursor: pointer;
         }
+        .left {
+            width: 500px;
+        }
+        .left, .right {
+            float: left
+        }
         #screenshot {
             display: block;
         }
@@ -23,7 +32,7 @@
             position: relative;
             display: inline-block;
         }
-        #screenshot-cover {
+        #screenshot-wrap canvas {
             position: absolute;
             top: 0;
             left: 0;
@@ -36,21 +45,30 @@
 
         #coefficient-range-wrap {
             margin-top: 30px;
-            margin-left: 22px;
         }
 
         #coefficient-range-title {
-            margin-bottom: 50px;
+            /* margin-bottom: 40px; */
+            font-weight: bold
         }
 
-        #coefficient-group {
+        #coefficient-range-group {
             display: inline-block;
             width: 400px;
             position: relative;
+            margin: 40px 0 0 22px ;
+        }
+
+        #coefficient-range-group.disabled{
+            opacity: .7
         }
 
         #coefficient-range{
             width: 100%;
+        }
+
+        #coefficient-range[disabled]{
+            cursor: not-allowed
         }
 
         #coefficient-range-tips {
@@ -80,279 +98,403 @@
     </style>
 </head>
 <body>
-    <p id="device-size">loading...</p>
+    <p id="loading">loading...</p>
+    <p id="device-size"></p>
     <p id="error-tips"></p>
-    <!--<p><button class="btn" id="screenshot-btn">刷新截屏</button></p>-->
-    <p id="coefficient-range-title" style="display: none;">弹跳时间系数：</p>
-    <div id="coefficient-range-wrap" style="display: none;">
-        <div id="coefficient-group">
-            <input id="coefficient-range" type="range" min="0" max="4" step="0.001" value="0"/>
-            <span id="coefficient-range-tips">0.000</span>
+
+    <div class="left">
+        <div id="step1" style="display: none;">
+            <div id="coefficient-range-wrap">
+                <p id="coefficient-range-title"></p>
+
+                <div id="switch-group">
+                    <label>
+                        手动调整系数（越大跳的越远，小则近）:
+                        <input type="checkbox" id="switch"/>
+                    </label>
+                </div>
+
+                <div id="coefficient-range-group">
+                    <input id="coefficient-range" type="range" min="0" max="3" step="0.001" value="0"/>
+                    <span id="coefficient-range-tips">0.000</span>
+                </div>
+            </div>
+            <div id="step1-control">
+                <p>
+                    1. 先打开微信，进入跳一跳小游戏，点击开始游戏
+                </p>
+                <p>
+                    2. 在右边截图中依次点击选取棋子小人的底座中心点和下一个积木的顶面中心点，并点击试跳按钮进行试跳，看时间系数是否正确<br>
+                </p>
+                <button id="jump-test-btn" class="btn">试跳</button>
+                <p>
+                    3. 如果能正确跳到积木中心，说明系数正确，可开始刷分，如果没跳正中心，需要手动调整系数继续试跳
+                </p>
+                <button id="step1-next-step" class="btn">开始刷分</button>
+            </div>
+        </div>
+
+        <div id="step2" style="display:none;">
+            <p>> 在右边截图中依次点击选取棋子小人的底座中心点和下一个积木的顶面中心点，选取完后会将会自动跳一步，下一步继续选即可</p>
+            <p>> 跳一步等屏幕截图刷新后再跳哦~</p>
+            <p>> 若选第一个点手残了，请点击 -> <button class="btn" id="screenshot-reset-btn">重新选</button></p>
+            <p>> 一步两步，一步两步，一步一步似爪牙，似魔鬼的步伐...ㄟ(▔,▔)ㄏ</p>
+            
         </div>
     </div>
+    <!--<p><button class="btn" id="screenshot-btn">刷新截屏</button></p>-->
+    <div class="right" style="display:none;">
+        <div id="screenshot-wrap">
+            <p id="screenshot-loading">获取截图中...</p>
+            <img id="screenshot" src="" alt="">
+            <canvas id="line-canvas"></canvas>
+            <canvas id="point-canvas"></canvas>
+        </div>
+        <br>
+    </div>
 
-    <p id="operation">
-        <span class="tips"></span>
-    </p>
-    <!--<div id="screenshot-wrap">
-        <img id="screenshot" src="" alt="">
-        <canvas id="screenshot-cover"></canvas>
-    </div>-->
-    <script src="http://cdn.bootcss.com/zepto/1.2.0/zepto.min.js
-    "></script>
+    <script src="http://cdn.bootcss.com/zepto/1.2.0/zepto.min.js"></script>
     <script src="./config/coefficient-config.js"></script>
-    <script>
-        let screenScale = 1 / 3 // 屏幕缩放比例
-        let coefficient = 1.392 // 时间系数
-        let screenSize = {}
-        let wsEventBus = $({})
+    <script>        
+        let SCREEN_SCALE = 1 / 3 // 屏幕缩放比例
 
-        let ws = new WebSocket('ws://127.0.0.1:8899')
+        // 入口
+        setTimeout(() => {
+            getWebSocket()
+                .then(initPage)
+                .then(initStepOne)
+                .catch(handlerError)
+        }, 0)
 
-        ws.addEventListener('open', () => {
-            ws.addEventListener('message', event => {
+        let common = (() => {
+            return {
+                hideLoading() {
+                    $('#loading').hide()
+                },
+
+                pullScreenshot(wneedLoop) {
+                    return ws.send({type: 'screenshot', data: {needLoop: needLoop}})
+                },
+
+                makePromiseFn(fn) {
+                    let promise
+                    return function() {
+                        return promise || (promise = new Promise((resolve, reject) => {
+                            fn(resolve, reject)
+                        }))
+                    }
+                },
+
+                calcDistance(x1, y1, x2, y2) {
+                    return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2))
+                },
+
+                clearCanvas(ctx) {
+                    ctx.clearRect(0, 0, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)
+                },
+
+                drawCircle(ctx, x, y, radius, style) {
+                    ctx.save()
+                    ctx.fillStyle = style
+                    ctx.beginPath()
+                    ctx.arc(x, y, radius, 0, Math.PI * 2)
+                    ctx.fill()
+                    ctx.restore()
+                },
+
+                drawLine(ctx, x1, y1, x2, y2, lineWidth, style) {
+                    ctx.save()
+                    ctx.lineWidth = lineWidth || 1
+                    ctx.strokeStyle = style
+                    ctx.beginPath()
+                    ctx.moveTo(x1, y1)
+                    ctx.lineTo(x2, y2)
+                    ctx.closePath()
+                    ctx.stroke()
+                    ctx.restore()
+                }
+            }
+        })()
+
+        let getWebSocket = common.makePromiseFn((resolve, reject) => {
+            let ws = new WebSocket('ws://127.0.0.1:8899')
+            let event = $(ws)
+
+            ws.on = event.on.bind(event)
+            ws.one = event.one.bind(event)
+            ws.trigger = event.trigger.bind(event)
+            ws.off = event.off.bind(event)
+
+            ws.on('open', () => {
+                let ws_send = ws.send
+                ws.send = function(param) {
+                    return new Promise((resolve, reject) => {
+                        ws.one(param.type, (e, data) => {
+                            resolve(data)
+                        })
+                        ws.one('deviceError', (e, error) => {
+                            reject(error)
+                        })
+                        ws_send.call(ws, JSON.stringify(param))
+                    })
+                }
+
+                resolve(ws)
+            })
+
+            ws.on('message', (event) => {
                 let message = JSON.parse(event.data)
                 console.log('onmessage:', message)
-                wsEventBus.trigger(message.type, [message.data])
+                ws.trigger(message.type, [message.data])
+            })
+
+            ws.on('error', () => {
+                reject('websocket 连接失败，请确认服务端是否开启')
             })
         })
 
-        let ws_send = ws.send
-        ws.send = function(param) {
-            return new Promise((resolve, reject) => {
-                wsEventBus.one(param.type, (e, data) => {
-                    resolve(data)
-                })
-                ws_send.call(ws, JSON.stringify(param))
-            })
-        }
 
-        wsEventBus.on('size', (e, size) => {
-            $('#device-size').html(`屏幕尺寸：${size.width} x ${size.height}`)
-            $('#screenshot').width(size.width * screenScale)
-            $('#screenshot-cover').prop('width', size.width * screenScale)
-                .prop('height', size.height * screenScale)
+        // 实时监听错误回调
+        function handlerError(error) {
+            common.hideLoading()
 
-            screenSize = size
-            // 初始化第一步操作
-            nextOperationStep()
-            
-        }).on('screenshot', (e, base64) => {
-            $('#screenshot').attr('src', base64)
-        }).on('error', (e, error) => {
             if (/device not found|no devices/.test(error)) {
                 $('#error-tips').html('请先用usb连接Android手机，并开启USB调试')
             } else {
-                $('#error-tips').html(`错误：${error}`)
+                $('#error-tips').html(`错误：${error || 'websocket 连接失败，请确认服务端是否开启'}`)
             }
-        })
-
-        function pullScreenshot() {
-            return ws.send({type: 'screenshot', data: {}})
         }
 
-        
-        // 操作步骤
-        var index = 0
-        var operationSteps = [{
-            tips: '先进入微信跳一跳小游戏，并点击开始游戏后',
-            init: function() {
-                let coefficient = coefficientConfig[`${screenSize.width}2x${screenSize.height}`]
-                let $title = $('#coefficient-range-title')
+        function initPage(ws) {
+            // 设备没连接时promise不会被resolve或reject
+            return ws.send({type: 'size'}).then((size) => {
+                common.hideLoading()
+                $('#device-size').html(`屏幕尺寸：${size.width} x ${size.height}`)
+                return size
+            })
+        }
 
-                if (coefficient) {
-                    $title.html($title.html() + `已根据你的机型设置最佳系数 ${coefficient}，无需手动调整`)
+        function initStepOne(size) {
+            $('#step1').show()
+            $('.right').show()
+
+            let coefficient = coefficientConfig[`${size.width}x${size.height}`]
+
+            let $title = $('#coefficient-range-title')
+            let $switch = $('#switch')
+            let $jumpTestBtn = $('#jump-test-btn')
+            let $nextStep = $('#step1-next-step')
+
+            if (coefficient) {
+                $title.html(`已根据你的机型设置最佳长按时间系数如下，无需手动调整`)
+                $switch.prop('checked', false)
+                rangeComp.disabled()
+            } else {
+                coefficient = coefficientConfig['default']
+                $title.html(`暂无法匹配你的机型最佳长按时间系数，已设置默认系数如下，可根据试跳结果手动调整`)
+                $switch.prop('checked', true)
+            }
+
+            // 设置系数初始值
+            rangeComp.setRange(coefficient)
+
+            // 初始化截图模块
+            screenshotComp.init(size)
+
+
+            // 开始实时更新截图
+            // screenshotComp.pullScreenshot()
+
+            $switch.on('change', function() {
+                if (this.checked) {
+                    rangeComp.enable()
                 } else {
-                    coefficient = coefficientConfig['default']
-                    $title.html($title.html() + `暂无法匹配你的机型最佳系数，已设置默认系数 ${coefficient}，可手动拖拉进度条调整系数`)
+                    rangeComp.disabled()
                 }
+            })
 
-
-                $title.show()
-                $('#coefficient-range-wrap').show()
-                $('#coefficient-range').val(coefficient).trigger('input')
-
-                
-            },
-            buttons: [{
-                text: '确认开始', 
-                click: function () {
-
-                }
-            }, {
-                text: '确认系数无误',
-                click: function() {
-
-                }
-            }],
-            destroy: function() {}
-        },/* {
-            tips: '先在截图上选择小人底部中心位置和第二个方块的上面中心位置后，截图处长按控制小人跳，保证能跳到第二个方块的圆心后（为保证之后每一次跳的精准度，这一步失败必须重试），点击下一步',
-            btnText: '下一步',
-            init: function() {
-                let touchstart = false
-                let startTime
-                let $canvas = $('#screenshot-cover')
-                let ctx = $canvas[0].getContext('2d')
-                let circleCount = 0
-                
-                this.points = []
-                this.ctx = ctx
-
-                $canvas.on('click', (e) => {
-                    if (circleCount < 2) {
-                        ctx.fillStyle = '#128ff3'
-                        drawCircle(ctx, e.offsetX, e.offsetY, 4)
-                        this.points.push({x: e.offsetX, y: e.offsetY})
-                        circleCount++
-                    }
+            $jumpTestBtn.on('click', function() {
+                screenshotComp.longTap().catch((errMsg) => {
+                    alert(errMsg)
                 })
+            })
+            
+            $nextStep.on('click', function() {
+                $('#step1-control').hide()
+                initStepTwo()
+            })
+            
+            return coefficient
+        }
 
-                $canvas.on('mousedown', (e) => {
-                    if (circleCount < 2) return 
-                    touchstart = true
-                    startTime = Date.now()
-                }).on('mouseup', (e) => {                    
-                    if (touchstart) {
-                        this.longTapTime = Date.now() - startTime
-                        let x = e.offsetX / screenScale
-                        let y = e.offsetY / screenScale
+        function initStepTwo() {
+            $('#step2').show()
+            screenshotComp.setAutoJump(true)
+            $('#screenshot-reset-btn').on('click', () => {
+                screenshotComp.resetStatus()
+            })
+        }
+        
+        // 截图操作
+        let screenshotComp = (() => {
+            let $screenshot = $('#screenshot')
+            let $pointCanvas = $('#point-canvas')
+            let $lineCanvas = $('#line-canvas')
+            let pointCtx = $pointCanvas[0].getContext('2d')
+            let lineCtx = $lineCanvas[0].getContext('2d')
 
-                        if (this.longTapTime > 50) {
-                            ws.send({type: 'longtap', data: {x: x, y: y, time: this.longTapTime}}).then(() => {
-                                setTimeout(() => {
-                                    pullScreenshot().then(() => {
-                                        // clearCanvas(ctx)
-                                    })
-                                }, 1000)
-                            })
+            let points = [] // 截图上单击选中的点
+            let autoJump = false
+            let triggerTap = false
+            let pointRadius = 4
+            let drawCount = 0
 
-                            touchstart = false
-                        } else {
-                            ws.send({type: 'tap', data: {x: x, y: y}}).then(() => {
-                                setTimeout(() => {
-                                    pullScreenshot().then(() => {
-                                        // clearCanvas(ctx)
-                                    })
-                                }, 1000)
-                            })  
-                            
-                            touchstart = false
+            let resetStatus = () => {
+                common.clearCanvas(pointCtx)
+                common.clearCanvas(lineCtx)
+                drawCount = 0
+                points = []
+            }
+
+            let initEvent = () => {
+                let onClick = (e) => {
+                    let x = e.offsetX, y = e.offsetY
+
+                    // 截图上需要触发单击事件，跟其他操作互斥
+                    if (triggerTap) {
+                        return instance.tap(x, y)
+                    }
+
+                    if (drawCount < 2) {
+                        common.drawCircle(pointCtx, x, y, pointRadius, '#128ff3')
+                        points.push({x, y})
+
+                        if (autoJump && drawCount == 1) {
+                            // longTap函数会根据points的两点距离计算实际按压时长
+                            instance.longTap()
                         }
 
-                        // setTimeout(() => {
-                        //     pullScreenshot()
-                        // }, 2000)
+                        drawCount++
+                    } else if(!autoJump) {
+                        // reset
+                        resetStatus()
+                        return onClick(e)
+                    }
+                }
+
+                $pointCanvas.on('click', onClick).on('mousemove', e => {
+                    if (drawCount == 1) {
+                        let x2 = e.offsetX, y2 = e.offsetY;
+                        common.clearCanvas(lineCtx)
+                        common.drawLine(lineCtx, points[0].x, points[0].y, x2, y2, 2, '#128ff3')
+                        common.drawCircle(lineCtx, x2, y2, pointRadius, '#128ff3')
                     }
                 })
-            },
-            btnHandler: function() {
-                let point1 = this.points[0]
-                let point2 = this.points[1]
-                let distance = calcDistance(point1.x, point1.y, point2.x, point2.y)
-                coefficient = this.longTapTime / distance
-
-                clearCanvas(this.ctx)
-            },
-            destroy: function() {
-                $('#screenshot-cover').off()
             }
-        }, */{
-            tips: '现在，开始拿分了！依次选择小人的底部中心位置、下一个方块的上面中心位置，小人将会自动跳',
-            btnText: '666',
-            init: function() {
-                let $canvas = $('#screenshot-cover')
-                let ctx = $canvas[0].getContext('2d')
-                let circleCount = 0
-                let points = []
-                let waiting = false
 
-                $canvas.on('click', (e) => {
-                    if (waiting) return 
+            let instance = {
+                init(size) {
+                    $screenshot.width(size.width * SCREEN_SCALE)
+                    $pointCanvas.prop('width',size.width * SCREEN_SCALE)
+                        .prop('height', size.height * SCREEN_SCALE)
+                    $lineCanvas.prop('width',size.width * SCREEN_SCALE)
+                        .prop('height', size.height * SCREEN_SCALE)
 
-                    // if (circleCount < 2) {
-                        ctx.fillStyle = '#128ff3'
-                        drawCircle(ctx, e.offsetX, e.offsetY, 4)
-                        points.push({x: e.offsetX, y: e.offsetY})
-                        circleCount++
-                    // }
-
-                    if (circleCount == 2) {
-                        waiting = true
-                        let point1 = points[0]
-                        let point2 = points[1]
-                        let distance = calcDistance(point1.x, point1.y, point2.x, point2.y)
-                        let time = Math.round((distance / screenScale) * coefficient)
-                        ws.send({type: 'longtap', data: {x: 0, y: 0, time: time}}).then(() => {
-                            setTimeout(() => {
-                                pullScreenshot().then(() => {
-                                    waiting = false
-                                    circleCount = 0
-                                    points = []
-                                    clearCanvas(ctx)
-                                })
-                            }, 1000)
+                    this.pullScreenshot()
+                },
+                
+                pullScreenshot() {
+                    getWebSocket().then(ws => {
+                        ws.one('screenshot', (e, path) => {
+                            $('#screenshot-loading').hide()
+                            initEvent()
+                        }).on('screenshot', (e, path) => {
+                            $screenshot.attr('src', path)
                         })
+                        ws.send({type: 'screenshot', data: {needLoop: true}})
+                    })
+                },
+                tap(x, y) {
+                    getWebSocket().then( ws => {
+                        ws.send({type: 'tap', data: {x, y}}).then(() => {
+                        })
+                    })
+                },
+                longTap() {
+                    if (points.length < 2) {
+                        return Promise.reject('先在截图选取两个中心点哦~')
                     }
-                })
+                    return getWebSocket().then( ws => {
+                        let x1 = points[0].x / SCREEN_SCALE
+                        let y1 = points[0].y / SCREEN_SCALE
+                        let x2 = points[1].x / SCREEN_SCALE
+                        let y2 = points[1].y / SCREEN_SCALE
+                        let distance = common.calcDistance(x1, y1, x2, y2)
+                        let pressTime = Math.round(distance * rangeComp.getRange()) // 长按时长
+
+                        return ws.send({
+                            type: 'longtap', 
+                            data: {time: pressTime, x: 0, y: 0}}
+                        ).then(() => {
+                            resetStatus()
+                        })
+                    })
+                },
+                setAutoJump(bool) {
+                    autoJump = bool
+                },
+                setTriggerTap(bool) {
+                    triggerTap = bool
+                },
+                resetStatus() {
+                    resetStatus()
+                }
             }
-        }]
-        
-        function nextOperationStep() {
-            let operation = operationSteps[index]
-            let $operation = $('#operation')
 
-            if (!operation) return
+            return instance
+        })()
 
-            operation.init && operation.init()
-
-            $operation.find('.tips').text(operation.tips)
-            
-            ;(operation.buttons || []).forEach(button => {
-                let $btn = $(button.text)
-                $btn.on('click', (...args) => {
-                    button.click.apply(operation, ...args)
-                }).appendTo($operation)
-            })
-
-            index++
-        }
-
-        function calcDistance(x1, y1, x2, y2) {
-            return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2))
-        }
-
-        function clearCanvas(ctx) {
-            ctx.clearRect(0, 0, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)
-        }
-
-        function drawCircle(ctx, x, y, radius) {
-            ctx.save()
-            ctx.beginPath()
-            ctx.arc(x, y, radius, 0, Math.PI * 2)
-            ctx.fill()
-            ctx.restore()
-        }        
-
-
-        (() => {
+        // 拖动条
+        let rangeComp = (() => {
             // 时间系数设置
-            var $range = $('#coefficient-range')
-            var $rangeTips = $('#coefficient-range-tips')
+            let $rangeGroup = $('#coefficient-range-group')
+            let $range = $('#coefficient-range')
+            let $rangeTips = $('#coefficient-range-tips')
+            let onChange = function() {}
 
             $range.on('input', function() {
-                updateRangeTips(this.value, this.max)
-            }).on('change', function() {
-                updateRangeTips(this.value, this.max)
-            })
-
-            function updateRangeTips(value, max) {
-                value = (+value).toFixed(3)
-                let left = value / max * $range.width()
+                let value = (+this.value).toFixed(3)
+                let left = value / this.max * $range.width()
                 $rangeTips.html(value)
                     .css('left', left)
+
+                onChange(value)
+            })
+
+            return {
+                setRange(value) {
+                    $range.val(value).trigger('input')
+                    return this
+                },
+                getRange() {
+                    return +$range.val()
+                },
+                disabled() {
+                    $rangeGroup.addClass('disabled')
+                    $range.prop('disabled', true)
+                    return this
+                },
+                enable() {
+                    $rangeGroup.removeClass('disabled')
+                    $range.prop('disabled', false)
+                    return this
+                },
+                onChange(callback) {
+                    onChange = callback
+                    return this
+                }
             }
-        })()
+        })()        
 
     </script>
 </body>
