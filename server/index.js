@@ -29,6 +29,7 @@ let wss = new WebSocket.Server({port: 8899})
 wss.on('connection', (ws, req) => {
     console.log('connection success')
     let getDeviceSizePromise = adbHelper.getDeviceSize()
+    let looping = false
 	// 获取设备分辨率
     ws.on('message', message => {
         console.log('received message:', message)
@@ -37,10 +38,11 @@ wss.on('connection', (ws, req) => {
 
         getDeviceSizePromise.then(size => {
             if (message.type == 'screenshot') {
+                if (looping) { return }
                 (function loopPush(){
                     screenshotHandler.push().then(path => {
                         ws.send(JSON.stringify({type: 'screenshot', data: path}), () => {
-                            data.needLoop && loopPush()
+                            data.needLoop && loopPush() && (looping = true)
                         })
                     })
                 })()

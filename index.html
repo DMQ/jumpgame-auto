@@ -109,12 +109,12 @@
             left: 120%;
             opacity: 0;
             transition: all 200ms ease;
-            z-index: -9
+            visibility: hidden;
         }
         #select-point-demo:hover img {
             left: 102%;
             opacity: 1;
-            z-index: 1;
+            visibility: visible;
         }
     </style>
 </head>
@@ -153,7 +153,7 @@
                 </p>
                 <button id="jump-test-btn" class="btn">试跳</button>
                 <p>
-                    3. 如果能正确跳到积木中心，说明系数正确，可开始刷分，如果没跳正中心，需要手动调整系数继续试跳，确认系数正确后，点击开始刷分进入下一步
+                    3. 如果能正确跳到积木中心，说明系数正确，可开始刷分，如果没跳正中心，需要手动调整系数重新选择起点和终点试跳，确认系数正确后，点击开始刷分进入下一步
                 </p>
                 <button id="step1-next-step" class="btn">开始刷分</button>
             </div>
@@ -162,7 +162,7 @@
         <div id="step2" style="display:none;">
             <p>> 在右边截图中依次点击选取棋子小人的底座中心点和下一个积木的顶面中心点，选取完后会将会自动跳一步，下一步继续选即可</p>
             <p>> 跳一步等屏幕截图刷新后再跳哦~</p>
-            <p>> 若选第一个点手残了，请点击 -> <button class="btn" id="screenshot-reset-btn">重新选</button></p>
+            <p>> 若选第一个点手残了，请按鼠标右键或者点击 -> <button class="btn" id="screenshot-reset-btn">重新选</button></p>
             <p>> 一步两步，一步两步，一步一步似爪牙，似魔鬼的步伐...ㄟ(▔,▔)ㄏ</p>
             
         </div>
@@ -403,13 +403,29 @@
                     }
                 }
 
-                $pointCanvas.on('click', onClick).on('mousemove', e => {
-                    if (drawCount == 1) {
-                        let x2 = e.offsetX, y2 = e.offsetY;
-                        common.clearCanvas(lineCtx)
-                        common.drawLine(lineCtx, points[0].x, points[0].y, x2, y2, 2, '#128ff3')
-                        common.drawCircle(lineCtx, x2, y2, pointRadius, '#128ff3')
-                    }
+                $pointCanvas.on('click', onClick)
+                    .on('mousemove', e => {
+                        if (drawCount == 1) {
+                            let x2 = e.offsetX, y2 = e.offsetY;
+                            common.clearCanvas(lineCtx)
+                            common.drawLine(lineCtx, points[0].x, points[0].y, x2, y2, 2, '#128ff3')
+                            common.drawCircle(lineCtx, x2, y2, pointRadius, '#128ff3')
+                        }
+                    }).on('mouseup', e => {
+                        // 鼠标右键重置
+                        if (e.button == 2) {
+                            resetStatus()
+                        }
+                    })
+            }
+
+            // 禁用鼠标右键菜单
+            let handlerContextMenu = () => {
+                let disabled = e => e.preventDefault()
+                $pointCanvas.on('mouseenter', e => {
+                    $(document).on('contextmenu', disabled)
+                }).on('mouseleave', e => {
+                    $(document).off('contextmenu', disabled)
                 })
             }
 
@@ -429,6 +445,7 @@
                         ws.one('screenshot', (e, path) => {
                             $('#screenshot-loading').hide()
                             initEvent()
+                            handlerContextMenu()
                         }).on('screenshot', (e, path) => {
                             $screenshot.attr('src', path)
                         })
